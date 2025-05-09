@@ -5,29 +5,50 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Meine GitHub Bildergalerie</title>
     <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden; /* Verhindert Scrollbalken auf der Seite */
+            background-color: #222; /* Hintergrund für den "Rand" im Vollbild */
+        }
+
         body {
             font-family: sans-serif;
-            margin: 0;
-            background-color: #333;
             color: #fff;
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
-            min-height: 100vh;
-            overflow: hidden;
         }
 
         #gallery-container {
             position: relative;
-            max-width: 90vw;
-            max-height: 85vh;
+            width: 98vw;
+            height: 96vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            border: 2px solid #555;
-            background-color: #222;
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        #gallery-container:-webkit-full-screen {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        #gallery-container:-moz-full-screen {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        #gallery-container:-ms-fullscreen {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+        }
+        #gallery-container:fullscreen {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
         }
 
         #current-image {
@@ -35,30 +56,46 @@
             max-height: 100%;
             object-fit: contain;
             display: block;
+            box-shadow: 0 0 20px rgba(0,0,0,0.7);
         }
 
         #filename-display {
             position: absolute;
-            bottom: 10px;
+            bottom: 20px;
             left: 50%;
             transform: translateX(-50%);
-            background-color: rgba(0, 0, 0, 0.7);
+            background-color: rgba(0, 0, 0, 0.75);
             color: white;
-            padding: 5px 10px;
-            border-radius: 3px;
-            font-size: 0.9em;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-size: 1.2em;
             display: none;
             white-space: nowrap;
             text-overflow: ellipsis;
             overflow: hidden;
-            max-width: 90%;
+            max-width: 80%;
+            z-index: 10;
         }
 
         .instructions, .loading-message, .error-message {
-            margin-top: 20px;
-            font-size: 0.8em;
+            position: fixed;
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.75em;
             color: #aaa;
+            background-color: rgba(30,30,30,0.8);
+            padding: 3px 8px;
+            border-radius: 3px;
+            z-index: 20;
             text-align: center;
+        }
+        .loading-message, .error-message { /* Für Lade- und Fehlermeldungen zentriert */
+            top: 50%;
+            bottom: auto;
+            transform: translate(-50%, -50%);
+            font-size: 1em;
+            padding: 10px 20px;
         }
         .error-message {
             color: #ff8080;
@@ -77,39 +114,46 @@
     </div>
 
     <div class="instructions">
-        <p>Pfeiltasten: Vor / Zurück | Leertaste: Dateinamen anzeigen/ausblenden</p>
+        <p>Pfeiltasten: Vor/Zurück | Leertaste: Dateiname | F: Vollbild</p>
     </div>
 
     <script>
         // --- KONFIGURATION ---
-        // WICHTIG: Passe diese Werte an dein GitHub Repository an!
-        const GITHUB_USERNAME = "ikeakatalog"; // Dein GitHub Benutzername
-        const GITHUB_REPONAME = "CelebFace";   // Name deines Repositories
-        const IMAGE_FOLDER_PATH = "Bilder"; // Pfad zum Bilderordner in deinem Repository
-        const BRANCH_NAME = "main"; // Oder "master", oder der Name deines Hauptbranches
+        const GITHUB_USERNAME = "ikeakatalog";
+        const GITHUB_REPONAME = "CelebFace";
+        const IMAGE_FOLDER_PATH = "Bilder"; // Standard: "Bilder". Anpassen, falls dein Ordner anders heißt.
+        const BRANCH_NAME = "main";       // Standard: "main". Anpassen, falls dein Branch z.B. "master" heißt.
         // --- ENDE KONFIGURATION ---
 
-        // Erlaubte Bild-Dateiendungen (kleingeschrieben)
         const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
 
-        let imagesData = []; // Wird Objekte enthalten: { name: "bild1.jpg", url: "https://..." }
+        let imagesData = [];
         let currentIndex = 0;
         let filenameVisible = false;
 
+        const galleryContainer = document.getElementById('gallery-container');
         const currentImageElement = document.getElementById('current-image');
         const filenameDisplayElement = document.getElementById('filename-display');
         const messageArea = document.getElementById('message-area');
+        const instructionsElement = document.querySelector('.instructions');
 
         function showMessage(text, type = "loading") {
-            messageArea.innerHTML = `<p class="${type}-message">${text}</p>`;
+            if (text === "") {
+                messageArea.innerHTML = "";
+                instructionsElement.style.display = 'block';
+            } else {
+                messageArea.innerHTML = `<p class="${type}-message">${text}</p>`;
+                instructionsElement.style.display = type === 'error' ? 'block' : 'none';
+            }
         }
 
         async function fetchImageFilesFromGitHub() {
-            if (!GITHUB_USERNAME || GITHUB_USERNAME === "DEIN_GITHUB_BENUTZERNAME" || !GITHUB_REPONAME || GITHUB_REPONAME === "DEIN_REPOSITORY_NAME") {
-                showMessage("Bitte konfiguriere GITHUB_USERNAME und GITHUB_REPONAME im Skript.", "error");
-                console.error("GITHUB_USERNAME oder GITHUB_REPONAME nicht konfiguriert.");
-                currentImageElement.alt = "Konfiguration fehlt.";
-                return;
+            // Frühzeitige Überprüfung, ob die Basiskonfiguration (Username/Repo) zumindest nicht mehr die Platzhalter sind
+            if (GITHUB_USERNAME === "DEIN_GITHUB_BENUTZERNAME" || GITHUB_REPONAME === "DEIN_REPOSITORY_NAME") {
+                 showMessage("Bitte GITHUB_USERNAME und GITHUB_REPONAME im Skript anpassen.", "error");
+                 console.error("GITHUB_USERNAME oder GITHUB_REPONAME sind noch die Platzhalter.");
+                 currentImageElement.alt = "Konfiguration unvollständig.";
+                 return;
             }
 
             const apiUrl = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPONAME}/contents/${IMAGE_FOLDER_PATH}?ref=${BRANCH_NAME}`;
@@ -118,12 +162,17 @@
                 const response = await fetch(apiUrl);
                 if (!response.ok) {
                     const errorData = await response.json().catch(() => ({ message: response.statusText }));
-                    throw new Error(`GitHub API Fehler: ${response.status}. ${errorData.message || ''} (URL: ${apiUrl})`);
+                    let userMessage = `GitHub API Fehler: ${response.status}. ${errorData.message || ''}`;
+                    if (response.status === 404) {
+                        userMessage += ` (Prüfe, ob Repository '${GITHUB_USERNAME}/${GITHUB_REPONAME}', Ordner '${IMAGE_FOLDER_PATH}' und Branch '${BRANCH_NAME}' existieren und öffentlich sind.)`;
+                    } else if (response.status === 403) {
+                         userMessage += ` (Möglicherweise API-Ratenlimit überschritten oder Zugriff verweigert. Ist das Repo öffentlich?)`;
+                    }
+                    throw new Error(userMessage);
                 }
                 const files = await response.json();
-
                 if (!Array.isArray(files)) {
-                    throw new Error("Die Antwort der GitHub API war kein Array. Ist der IMAGE_FOLDER_PATH korrekt und ein Ordner?");
+                    throw new Error("Antwort der GitHub API war kein Array. Ist IMAGE_FOLDER_PATH korrekt und ein Ordner?");
                 }
 
                 imagesData = files
@@ -131,23 +180,19 @@
                         file.type === "file" &&
                         ALLOWED_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext))
                     )
-                    .map(file => ({
-                        name: file.name,
-                        url: file.download_url // Wichtig: download_url verwenden für den direkten Dateizugriff
-                    }))
-                    .sort((a, b) => a.name.localeCompare(b.name)); // Optional: Bilder alphabetisch sortieren
+                    .map(file => ({ name: file.name, url: file.download_url }))
+                    .sort((a, b) => a.name.localeCompare(b.name)); // Alphabetische Sortierung
 
                 if (imagesData.length > 0) {
-                    showMessage(""); // Nachricht löschen
+                    showMessage("");
                     showImage(0);
                 } else {
-                    showMessage(`Keine Bilder im Ordner '${IMAGE_FOLDER_PATH}' gefunden oder der Ordner existiert nicht.`, "error");
+                    showMessage(`Keine Bilder mit passenden Endungen (${ALLOWED_EXTENSIONS.join(', ')}) im Ordner '${IMAGE_FOLDER_PATH}' im Repository '${GITHUB_USERNAME}/${GITHUB_REPONAME}' (Branch: ${BRANCH_NAME}) gefunden oder der Ordner ist leer/existiert nicht.`, "error");
                     currentImageElement.alt = "Keine Bilder gefunden.";
                 }
-
             } catch (error) {
                 console.error("Fehler beim Laden der Bildliste von GitHub:", error);
-                showMessage(`Fehler beim Laden: ${error.message}`, "error");
+                showMessage(`Fehler: ${error.message}`, "error");
                 currentImageElement.alt = "Fehler beim Laden.";
             }
         }
@@ -165,6 +210,7 @@
                 currentImageElement.src = imageData.url;
                 currentImageElement.alt = imageData.name;
                 filenameDisplayElement.textContent = imageData.name;
+                filenameVisible = false;
                 updateFilenameVisibility();
             }
         }
@@ -201,20 +247,65 @@
             updateFilenameVisibility();
         }
 
+        function toggleFullscreen() {
+            if (!document.fullscreenElement &&
+                !document.mozFullScreenElement &&
+                !document.webkitFullscreenElement &&
+                !document.msFullscreenElement) {
+                if (galleryContainer.requestFullscreen) {
+                    galleryContainer.requestFullscreen();
+                } else if (galleryContainer.mozRequestFullScreen) {
+                    galleryContainer.mozRequestFullScreen();
+                } else if (galleryContainer.webkitRequestFullscreen) {
+                    galleryContainer.webkitRequestFullscreen();
+                } else if (galleryContainer.msRequestFullscreen) {
+                    galleryContainer.msRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.mozCancelFullScreen) {
+                    document.mozCancelFullScreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                } else if (document.msExitFullscreen) {
+                    document.msExitFullscreen();
+                }
+            }
+        }
+
         document.addEventListener('keydown', function(event) {
-            if (event.key === "ArrowRight") {
-                nextImage();
-            } else if (event.key === "ArrowLeft") {
-                prevImage();
-            } else if (event.key === " " || event.code === "Space") {
-                event.preventDefault();
-                toggleFilename();
+            if (imagesData.length === 0 && !(event.key.toLowerCase() === 'f')) {
+                if (event.key === " " || event.code === "Space") event.preventDefault();
+                return;
+            }
+
+            switch (event.key.toLowerCase()) {
+                case "arrowright":
+                    nextImage();
+                    break;
+                case "arrowleft":
+                    prevImage();
+                    break;
+                case " ":
+                case "spacebar":
+                    event.preventDefault();
+                    toggleFilename();
+                    break;
+                case "f":
+                    event.preventDefault();
+                    toggleFullscreen();
+                    break;
             }
         });
 
-        // Lade die Bilddateinamen, sobald das Skript ausgeführt wird
-        fetchImageFilesFromGitHub();
+        ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(
+            event => document.addEventListener(event, () => {
+                // console.log("Fullscreen state changed!");
+            })
+        );
 
+        fetchImageFilesFromGitHub();
     </script>
 
 </body>
