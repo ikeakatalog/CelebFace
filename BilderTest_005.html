@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wort-Bild-Tooltip (DDG - Debug Cache)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            padding: 20px;
+            background-color: #f0f2f5;
+            color: #1c1e21;
+            line-height: 1.5;
+        }
+        #app-container {
+            max-width: 800px;
+            margin: 20px auto;
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #de5833; /* DuckDuckGo Orange */
+            margin-bottom: 25px;
+        }
+        #controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 25px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        #wordInput {
+            flex-grow: 1;
+            padding: 10px 12px;
+            border: 1px solid #ced4da;
+            border-radius: 6px;
+            font-size: 16px;
+        }
+        #wordInput:focus {
+            outline: none;
+            border-color: #eda590; /* Helleres DDG Orange */
+            box-shadow: 0 0 0 0.2rem rgba(222, 88, 51, .25);
+        }
+        #addWordBtn {
+            padding: 10px 20px;
+            background-color: #de5833;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s ease-in-out;
+        }
+        #addWordBtn:hover {
+            background-color: #b94a2a; /* Dunkleres DDG Orange */
+        }
+        #wordContainer {
+            margin-top: 20px;
+            padding: 20px;
+            background-color: #ffffff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            min-height: 100px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .word-item {
+            display: inline-block;
+            padding: 8px 15px;
+            background-color: #e9ecef;
+            color: #495057;
+            border-radius: 20px;
+            cursor: pointer;
+            position: relative;
+            border: 1px solid #ced4da;
+            font-size: 15px;
+            transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.1s ease;
+        }
+        .word-item:hover {
+            background-color: #de5833;
+            color: white;
+            border-color: #b94a2a;
+            transform: translateY(-2px);
+        }
+
+        #imageTooltip {
+            position: absolute;
+            display: none;
+            border: 1px solid #adb5bd;
+            background-color: white;
+            padding: 8px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+            z-index: 1000;
+            border-radius: 8px;
+            text-align: center;
+            pointer-events: none;
+            overflow: hidden;
+        }
+        #imageTooltip img {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+            object-fit: contain;
+            margin: 0 auto;
+            border-radius: 4px;
+        }
+        #imageTooltip .loading-text {
+            font-style: italic;
+            color: #6c757d;
+            padding: 20px;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="app-container">
+        <h1>Bild-Tooltip für Wörter (DDG - Debug Cache)</h1>
+        <p>Öffne die Browser-Konsole (Rechtsklick -> Untersuchen -> Konsole), um die Log-Ausgaben zu sehen.</p>
+        <div id="controls">
+            <input type="text" id="wordInput" placeholder="Begriff eingeben...">
+            <button id="addWordBtn">Wort hinzufügen</button>
+        </div>
+
+        <div id="wordContainer">
+            <span class="word-item">Test</span>
+            <span class="word-item">Katze</span>
+            <span class="word-item">Paris</span>
+        </div>
+
+        <div id="imageTooltip">
+            <span class="loading-text">Lade Bild...</span>
+            <img src="" alt="Suchergebnis" style="display:none;">
+        </div>
+    </div>
+
+    <script>
+        const wordInput = document.getElementById('wordInput');
+        const addWordBtn = document.getElementById('addWordBtn');
+        const wordContainer = document.getElementById('wordContainer');
+        const imageTooltip = document.getElementById('imageTooltip');
+        const tooltipImage = imageTooltip.querySelector('img');
+        const tooltipLoadingText = imageTooltip.querySelector('.loading-text');
+
+        let currentMouseEvent = null;
+        const imageCache = {}; // Cache für erfolgreiche Bild-URLs oder "nicht gefunden"
+        const fetchErrorCache = {}; // Cache für "Failed to fetch" oder HTTP-Fehler von der API
+
+        const FETCH_ERROR_CACHE_DURATION = 5 * 60 * 1000; // 5 Minuten für Fehler-Cache
+
+        console.log("Skript initialisiert. Caches sind leer:", { imageCache, fetchErrorCache });
+
+        document.querySelectorAll('.word-item').forEach(item => {
+            item.addEventListener('mouseenter', (e) => { currentMouseEvent = e; showTooltip(e); });
+            item.addEventListener('mousemove', (e) => { currentMouseEvent = e; moveTooltip(e); });
+            item.addEventListener('mouseleave', hideTooltip);
+        });
+
+        addWordBtn.addEventListener('click', addWordFromInput);
+        wordInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); addWordFromInput(); }
+        });
+
+        function addWordFromInput() {
+            const wordText = wordInput.value.trim();
+            if (wordText === '') return;
+            addWordElement(wordText);
+            wordInput.value = ''; wordInput.focus();
+        }
+
+        function addWordElement(wordText) {
+            const wordSpan = document.createElement('span');
+            wordSpan.classList.add('word-item');
+            wordSpan.textContent = wordText;
+            wordSpan.addEventListener('mouseenter', (e) => { currentMouseEvent = e; showTooltip(e); });
+            wordSpan.addEventListener('mousemove', (e) => { currentMouseEvent = e; moveTooltip(e); });
+            wordSpan.addEventListener('mouseleave', hideTooltip);
+            wordContainer.appendChild(wordSpan);
+        }
+
+        async function showTooltip(event) {
+            const searchTerm = event.target.textContent;
+            console.log(`--- showTooltip für "${searchTerm}" aufgerufen ---`);
+
+            currentMouseEvent = event; // Sicherstellen, dass es aktuell ist
+
+            tooltipImage.style.display = 'none';
+            tooltipImage.src = '';
+            tooltipLoadingText.style.display = 'block';
+            tooltipLoadingText.textContent = 'Lade Bild...';
+
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+            const maxAllowedSize = 800;
+            const targetTooltipWidth = Math.min(viewportWidth * 0.5, maxAllowedSize);
+            const targetTooltipHeight = Math.min(viewportHeight * 0.7, maxAllowedSize);
+
+            imageTooltip.style.maxWidth = `${targetTooltipWidth}px`;
+            imageTooltip.style.maxHeight = `${targetTooltipHeight}px`;
+            imageTooltip.style.width = 'auto';
+            imageTooltip.style.height = 'auto';
+            imageTooltip.style.display = 'block';
+            moveTooltip(event);
+
+            // 1. Prüfe Fetch-Fehler-Cache
+            if (fetchErrorCache[searchTerm]) {
+                const errorEntry = fetchErrorCache[searchTerm];
+                if (Date.now() - errorEntry.timestamp < FETCH_ERROR_CACHE_DURATION) {
+                    console.warn(`"${searchTerm}": Aus Fetch-FEHLER-Cache geladen. Grund: ${errorEntry.message}`);
+                    tooltipLoadingText.textContent = `API-Fehler (gecacht): ${errorEntry.message.substring(0, 50)}...`;
+                    tooltipImage.style.display = 'none';
+                    return; // AUSSTIEG
+                } else {
+                    console.log(`"${searchTerm}": Alter Fehler-Cache-Eintrag abgelaufen, wird entfernt.`);
+                    delete fetchErrorCache[searchTerm];
+                }
+            }
+
+            // 2. Prüfe Erfolgs/Bild-Cache
+            if (imageCache[searchTerm]) {
+                const cachedEntry = imageCache[searchTerm];
+                console.log(`"${searchTerm}": Aus Bild-ERFOLGS-Cache geladen.`);
+                if (cachedEntry.imageUrl) {
+                    tooltipLoadingText.textContent = 'Lade gecachtes Bild...'; // Kurzer Hinweis
+                    tooltipImage.onload = () => {
+                        tooltipLoadingText.style.display = 'none';
+                        tooltipImage.style.display = 'block';
+                        if (currentMouseEvent) moveTooltip(currentMouseEvent);
+                    };
+                    tooltipImage.onerror = () => {
+                        console.error(`"${searchTerm}": Fehler beim Laden des BILDES aus Cache-URL: ${cachedEntry.imageUrl}`);
+                        tooltipLoadingText.textContent = 'Fehler: Gecachtes Bild nicht ladbar.';
+                        tooltipImage.style.display = 'none';
+                        delete imageCache[searchTerm]; // Fehlerhaften Eintrag entfernen
+                    };
+                    tooltipImage.src = cachedEntry.imageUrl;
+                } else { // `imageUrl` ist null, bedeutet "nicht gefunden"
+                    tooltipLoadingText.textContent = 'Kein Bild via DDG gefunden (aus Cache).';
+                    tooltipImage.style.display = 'none';
+                }
+                return; // AUSSTIEG
+            }
+
+            console.log(`"${searchTerm}": Kein gültiger Cache-Eintrag. Starte DDG API Anfrage...`);
+            const DUCKDUCKGO_API_ENDPOINT = `https://api.duckduckgo.com/?q=${encodeURIComponent(searchTerm)}&format=json&no_html=1&skip_disambig=1&no_redirect=1`;
+
+            try {
+                const response = await fetch(DUCKDUCKGO_API_ENDPOINT);
+                console.log(`"${searchTerm}": Antwort von fetch erhalten. Status: ${response.status}`);
+
+                if (!response.ok) {
+                    let errorResponseMessage = `HTTP ${response.status}: ${response.statusText || 'Unbekannter HTTP-Fehler'}`;
+                    try {
+                        const errorBody = await response.text(); // Versuche, den Body zu lesen
+                        if (errorBody) errorResponseMessage += ` - Body: ${errorBody.substring(0,150)}`;
+                        console.error(`"${searchTerm}": HTTP-Fehler Detail: ${errorResponseMessage}`);
+                    } catch (e) {
+                        console.error(`"${searchTerm}": HTTP-Fehler, konnte Body nicht lesen.`, e);
+                    }
+                    throw new Error(errorResponseMessage); // Werfe den Fehler, damit er im catch unten behandelt wird
+                }
+
+                const data = await response.json();
+                console.log(`"${searchTerm}": JSON-Daten von API erhalten:`, data);
+                let imageUrl = null;
+
+                // Bild-Extraktionslogik (wie zuvor)
+                if (data.Image && data.Image !== "" && typeof data.Image === 'string') {
+                    imageUrl = data.Image.startsWith("http") ? data.Image : `https://duckduckgo.com${data.Image.startsWith('/') ? '' : '/'}${data.Image}`;
+                } else if (data.RelatedTopics && data.RelatedTopics.length > 0) {
+                    // ... (gekürzt, Logik ist dieselbe) ...
+                    for (let topic of data.RelatedTopics) {
+                        if (topic.Icon && topic.Icon.URL && typeof topic.Icon.URL === 'string' && topic.Icon.URL.trim() !== '') {
+                             imageUrl = `https://duckduckgo.com${topic.Icon.URL.startsWith('/') ? '' : '/'}${topic.Icon.URL}`;
+                             break;
+                        }
+                        // (Weitere Logik für subTopics falls nötig)
+                        if (imageUrl) break;
+                    }
+                }
+
+
+                if (imageUrl) {
+                    console.log(`"${searchTerm}": Bild-URL gefunden: ${imageUrl}. Wird in imageCache gespeichert.`);
+                    imageCache[searchTerm] = { imageUrl: imageUrl, timestamp: Date.now() };
+                    tooltipImage.onload = () => {
+                        tooltipLoadingText.style.display = 'none';
+                        tooltipImage.style.display = 'block';
+                        if (currentMouseEvent) moveTooltip(currentMouseEvent);
+                    };
+                    tooltipImage.onerror = () => {
+                        console.error(`"${searchTerm}": Fehler beim Laden des BILDES von URL: ${imageUrl}`);
+                        tooltipLoadingText.textContent = 'Fehler beim Laden des DDG-Bildes.';
+                        tooltipImage.style.display = 'none';
+                        delete imageCache[searchTerm];
+                    };
+                    tooltipImage.src = imageUrl;
+                } else {
+                    console.log(`"${searchTerm}": Kein Bild in API-Antwort gefunden. Wird als "nicht gefunden" in imageCache gespeichert.`);
+                    imageCache[searchTerm] = { imageUrl: null, timestamp: Date.now() }; // "Nicht gefunden" explizit cachen
+                    tooltipLoadingText.textContent = 'Kein Bild via DDG gefunden.';
+                    tooltipImage.style.display = 'none';
+                }
+                // Evtl. alten Fehler-Cache-Eintrag löschen, da jetzt erfolgreich
+                if (fetchErrorCache[searchTerm]) {
+                    console.log(`"${searchTerm}": API-Aufruf erfolgreich, lösche alten Fehler-Cache-Eintrag.`);
+                    delete fetchErrorCache[searchTerm];
+                }
+
+            } catch (error) { // Fängt "Failed to fetch" oder den Error von !response.ok
+                console.error(`"${searchTerm}": API-AUFRUF FEHLGESCHLAGEN. Fehlerobjekt:`, error);
+                const displayErrorMessage = error.message || 'Unbekannter API Fehler';
+                tooltipLoadingText.textContent = `API-Fehler: ${displayErrorMessage.substring(0, 70)}...`;
+                tooltipImage.style.display = 'none';
+
+                console.log(`"${searchTerm}": Speichere Fehler im fetchErrorCache: ${displayErrorMessage}`);
+                fetchErrorCache[searchTerm] = { message: displayErrorMessage, timestamp: Date.now() };
+            }
+            console.log(`--- showTooltip für "${searchTerm}" beendet. Aktuelle Caches:`, { imageCache, fetchErrorCache });
+        }
+
+        function moveTooltip(event) {
+            // ... (moveTooltip unverändert) ...
+            if (!imageTooltip.style.display || imageTooltip.style.display === 'none') return;
+            const eventX = event.pageX;
+            const eventY = event.pageY;
+            const tooltipWidth = imageTooltip.offsetWidth;
+            const tooltipHeight = imageTooltip.offsetHeight;
+            let x = eventX + 20;
+            let y = eventY + 20;
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+            const scrollX = window.scrollX;
+            const scrollY = window.scrollY;
+            if (x + tooltipWidth > viewportWidth + scrollX) {
+                x = eventX - tooltipWidth - 20;
+                if (x < scrollX) x = scrollX + 5;
+            }
+            if (x < scrollX) x = scrollX + 5;
+            if (y + tooltipHeight > viewportHeight + scrollY) {
+                y = eventY - tooltipHeight - 20;
+                if (y < scrollY) y = scrollY + 5;
+            }
+            if (y < scrollY) y = scrollY + 5;
+            imageTooltip.style.left = `${x}px`;
+            imageTooltip.style.top = `${y}px`;
+        }
+
+        function hideTooltip() {
+            // ... (hideTooltip unverändert) ...
+            console.log("--- hideTooltip aufgerufen ---");
+            imageTooltip.style.display = 'none';
+            tooltipImage.src = '';
+            tooltipLoadingText.textContent = 'Lade Bild...';
+            currentMouseEvent = null;
+            imageTooltip.style.maxWidth = '';
+            imageTooltip.style.maxHeight = '';
+            imageTooltip.style.width = '';
+            imageTooltip.style.height = '';
+        }
+    </script>
+
+</body>
+</html>
