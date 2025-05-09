@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meine GitHub Bildergalerie</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            margin: 0;
+            background-color: #333;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        #gallery-container {
+            position: relative;
+            max-width: 90vw;
+            max-height: 85vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 2px solid #555;
+            background-color: #222;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+
+        #current-image {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+
+        #filename-display {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 0.9em;
+            display: none;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            max-width: 90%;
+        }
+
+        .instructions, .loading-message, .error-message {
+            margin-top: 20px;
+            font-size: 0.8em;
+            color: #aaa;
+            text-align: center;
+        }
+        .error-message {
+            color: #ff8080;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gallery-container">
+        <img id="current-image" src="" alt="Bild lädt...">
+        <div id="filename-display"></div>
+    </div>
+
+    <div id="message-area">
+        <p class="loading-message">Lade Bilderliste von GitHub...</p>
+    </div>
+
+    <div class="instructions">
+        <p>Pfeiltasten: Vor / Zurück | Leertaste: Dateinamen anzeigen/ausblenden</p>
+    </div>
+
+    <script>
+        // --- KONFIGURATION ---
+        // WICHTIG: Passe diese Werte an dein GitHub Repository an!
+        const GITHUB_USERNAME = "DEIN_GITHUB_BENUTZERNAME"; // Dein GitHub Benutzername
+        const GITHUB_REPONAME = "DEIN_REPOSITORY_NAME";   // Name deines Repositories
+        const IMAGE_FOLDER_PATH = "Bilder"; // Pfad zum Bilderordner in deinem Repository
+        const BRANCH_NAME = "main"; // Oder "master", oder der Name deines Hauptbranches
+        // --- ENDE KONFIGURATION ---
+
+        // Erlaubte Bild-Dateiendungen (kleingeschrieben)
+        const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+
+        let imagesData = []; // Wird Objekte enthalten: { name: "bild1.jpg", url: "https://..." }
+        let currentIndex = 0;
+        let filenameVisible = false;
+
+        const currentImageElement = document.getElementById('current-image');
+        const filenameDisplayElement = document.getElementById('filename-display');
+        const messageArea = document.getElementById('message-area');
+
+        function showMessage(text, type = "loading") {
+            messageArea.innerHTML = `<p class="${type}-message">${text}</p>`;
+        }
+
+        async function fetchImageFilesFromGitHub() {
+            if (!GITHUB_USERNAME || GITHUB_USERNAME === "DEIN_GITHUB_BENUTZERNAME" || !GITHUB_REPONAME || GITHUB_REPONAME === "DEIN_REPOSITORY_NAME") {
+                showMessage("Bitte konfiguriere GITHUB_USERNAME und GITHUB_REPONAME im Skript.", "error");
+                console.error("GITHUB_USERNAME oder GITHUB_REPONAME nicht konfiguriert.");
+                currentImageElement.alt = "Konfiguration fehlt.";
+                return;
+            }
+
+            const apiUrl = `https://api.github.com/repos/${GITHUB_USERNAME}/${GITHUB_REPONAME}/contents/${IMAGE_FOLDER_PATH}?ref=${BRANCH_NAME}`;
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: response.statusText }));
+                    throw new Error(`GitHub API Fehler: ${response.status}. ${errorData.message || ''} (URL: ${apiUrl})`);
+                }
+                const files = await response.json();
+
+                if (!Array.isArray(files)) {
+                    throw new Error("Die Antwort der GitHub API war kein Array. Ist der IMAGE_FOLDER_PATH korrekt und ein Ordner?");
+                }
+
+                imagesData = files
+                    .filter(file =>
+                        file.type === "file" &&
+                        ALLOWED_EXTENSIONS.some(ext => file.name.toLowerCase().endsWith(ext))
+                    )
+                    .map(file => ({
+                        name: file.name,
+                        url: file.download_url // Wichtig: download_url verwenden für den direkten Dateizugriff
+                    }))
+                    .sort((a, b) => a.name.localeCompare(b.name)); // Optional: Bilder alphabetisch sortieren
+
+                if (imagesData.length > 0) {
+                    showMessage(""); // Nachricht löschen
+                    showImage(0);
+                } else {
+                    showMessage(`Keine Bilder im Ordner '${IMAGE_FOLDER_PATH}' gefunden oder der Ordner existiert nicht.`, "error");
+                    currentImageElement.alt = "Keine Bilder gefunden.";
+                }
+
+            } catch (error) {
+                console.error("Fehler beim Laden der Bildliste von GitHub:", error);
+                showMessage(`Fehler beim Laden: ${error.message}`, "error");
+                currentImageElement.alt = "Fehler beim Laden.";
+            }
+        }
+
+        function showImage(index) {
+            if (imagesData.length === 0) {
+                currentImageElement.alt = "Keine Bilder verfügbar.";
+                currentImageElement.src = "";
+                filenameDisplayElement.textContent = "";
+                return;
+            }
+            if (index >= 0 && index < imagesData.length) {
+                currentIndex = index;
+                const imageData = imagesData[currentIndex];
+                currentImageElement.src = imageData.url;
+                currentImageElement.alt = imageData.name;
+                filenameDisplayElement.textContent = imageData.name;
+                updateFilenameVisibility();
+            }
+        }
+
+        function updateFilenameVisibility() {
+            if (filenameVisible && imagesData.length > 0) {
+                filenameDisplayElement.style.display = 'block';
+            } else {
+                filenameDisplayElement.style.display = 'none';
+            }
+        }
+
+        function nextImage() {
+            if (imagesData.length === 0) return;
+            let newIndex = currentIndex + 1;
+            if (newIndex >= imagesData.length) {
+                newIndex = 0;
+            }
+            showImage(newIndex);
+        }
+
+        function prevImage() {
+            if (imagesData.length === 0) return;
+            let newIndex = currentIndex - 1;
+            if (newIndex < 0) {
+                newIndex = imagesData.length - 1;
+            }
+            showImage(newIndex);
+        }
+
+        function toggleFilename() {
+            if (imagesData.length === 0) return;
+            filenameVisible = !filenameVisible;
+            updateFilenameVisibility();
+        }
+
+        document.addEventListener('keydown', function(event) {
+            if (event.key === "ArrowRight") {
+                nextImage();
+            } else if (event.key === "ArrowLeft") {
+                prevImage();
+            } else if (event.key === " " || event.code === "Space") {
+                event.preventDefault();
+                toggleFilename();
+            }
+        });
+
+        // Lade die Bilddateinamen, sobald das Skript ausgeführt wird
+        fetchImageFilesFromGitHub();
+
+    </script>
+
+</body>
+</html>
