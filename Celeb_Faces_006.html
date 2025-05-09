@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meine GitHub Bildergalerie</title>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            overflow: hidden;
+            background-color: #212121;
+        }
+
+        body {
+            font-family: sans-serif;
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #gallery-container {
+            position: relative;
+            width: 98vw;
+            height: 96vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #gallery-container:-webkit-full-screen { width: 100%; height: 100%; background-color: #000; }
+        #gallery-container:-moz-full-screen { width: 100%; height: 100%; background-color: #000; }
+        #gallery-container:-ms-fullscreen { width: 100%; height: 100%; background-color: #000; }
+        #gallery-container:fullscreen { width: 100%; height: 100%; background-color: #000; }
+
+        #current-image {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+            box-shadow: 0 0 20px rgba(0,0,0,0.7);
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+        }
+
+        #filename-display {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.75);
+            color: white;
+            padding: 8px 15px;
+            border-radius: 5px;
+            font-size: 1.2em;
+            display: none;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            max-width: 80%;
+            z-index: 10;
+        }
+
+        .instructions, .loading-message, .error-message {
+            position: fixed;
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.75em;
+            color: #aaa;
+            background-color: rgba(30,30,30,0.8);
+            padding: 3px 8px;
+            border-radius: 3px;
+            z-index: 20;
+            text-align: center;
+        }
+        .loading-message, .error-message {
+            top: 50%; bottom: auto; transform: translate(-50%, -50%); font-size: 1em; padding: 10px 20px;
+        }
+        .error-message { color: #ff8080; }
+    </style>
+</head>
+<body>
+
+    <div id="gallery-container">
+        <img id="current-image" src="#" alt="Bild lädt...">
+        <div id="filename-display"></div>
+    </div>
+
+    <div id="message-area">
+        <p class="loading-message">Lade Bilderliste von GitHub...</p>
+    </div>
+
+    <div class="instructions">
+        <p>Pfeiltasten: Vor/Zurück | Leertaste: Dateiname | F: Vollbild</p>
+    </div>
+
+    <script>
+        // --- KONFIGURATION ---
+        const GITHUB_USERNAME = "ikeakatalog";
+        const GITHUB_REPONAME = "CelebFace";
+        const IMAGE_FOLDER_PATH = "Bilder";
+        const BRANCH_NAME = "main";
+        // --- ENDE KONFIGURATION ---
+
+        const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'];
+        const FADE_DURATION = 300;
+
+        let imagesData = [];
+        let currentIndex = 0;
+        let filenameVisible = false;
+        let isTransitioningImage = false; // Umbenannt für Klarheit
+
+        const galleryContainer = document.getElementById('gallery-container');
+        const currentImageElement = document.getElementById('current-image');
+        const filenameDisplayElement = document.getElementById('filename-display');
+        const messageArea = document.getElementById('message-area');
+        const instructionsElement = document.querySelector('.instructions');
+
+        function showMessage(text, type = "loading") { /* ... bleibt gleich ... */ }
+        async function fetchImageFilesFromGitHub() { /* ... bleibt gleich ... */ }
+
+        function showImage(index, isInitialLoad = false) {
+            if (isTransitioningImage || imagesData.length === 0) return;
+            if (index < 0 || index >= imagesData.length) return;
+
+            isTransitioningImage = true;
+            currentIndex = index;
+            const imageData = imagesData[currentIndex];
+
+            const performLoadAndFadeIn = () => {
+                const onImageLoad = () => {
+                    currentImageElement.removeEventListener('load', onImageLoad);
+                    currentImageElement.removeEventListener('error', onImageError);
+                    currentImageElement.style.opacity = 1;
+                    filenameDisplayElement.textContent = imageData.name;
+                    filenameVisible = false; // Dateiname bei Bildwechsel ausblenden
+                    updateFilenameVisibility();
+                    isTransitioningImage = false;
+                };
+                const onImageError = () => {
+                    console.error("Fehler beim Laden des Bildes:", imageData.url);
+                    currentImageElement.removeEventListener('load', onImageLoad);
+                    currentImageElement.removeEventListener('error', onImageError);
+                    currentImageElement.alt = `Fehler: ${imageData.name} konnte nicht geladen werden.`;
+                    currentImageElement.src = "#";
+                    currentImageElement.style.opacity = 1;
+                    isTransitioningImage = false;
+                };
+
+                currentImageElement.addEventListener('load', onImageLoad);
+                currentImageElement.addEventListener('error', onImageError);
+                currentImageElement.alt = imageData.name;
+                currentImageElement.src = imageData.url;
+            };
+
+            if (isInitialLoad || currentImageElement.src.endsWith("#")) {
+                performLoadAndFadeIn();
+            } else {
+                currentImageElement.style.opacity = 0;
+                setTimeout(performLoadAndFadeIn, FADE_DURATION);
+            }
+        }
+
+        function updateFilenameVisibility() {
+            if (filenameVisible && imagesData.length > 0) {
+                filenameDisplayElement.style.display = 'block';
+            } else {
+                filenameDisplayElement.style.display = 'none';
+            }
+        }
+
+        function nextImage() {
+            if (isTransitioningImage || imagesData.length === 0) return; // Blockieren, wenn Bild wechselt
+            let newIndex = currentIndex + 1;
+            if (newIndex >= imagesData.length) newIndex = 0;
+            showImage(newIndex);
+        }
+
+        function prevImage() {
+             if (isTransitioningImage || imagesData.length === 0) return; // Blockieren, wenn Bild wechselt
+            let newIndex = currentIndex - 1;
+            if (newIndex < 0) newIndex = imagesData.length - 1;
+            showImage(newIndex);
+        }
+
+        function toggleFilename() {
+            // Diese Funktion sollte NICHT durch isTransitioningImage blockiert werden
+            if (imagesData.length === 0) return;
+            filenameVisible = !filenameVisible;
+            updateFilenameVisibility();
+        }
+
+        function toggleFullscreen() {
+            // Diese Funktion sollte auch NICHT durch isTransitioningImage blockiert werden
+            if (!document.fullscreenElement && !document.mozFullScreenElement && !document.webkitFullscreenElement && !document.msFullscreenElement) {
+                const promise = galleryContainer.requestFullscreen ? galleryContainer.requestFullscreen() :
+                                galleryContainer.mozRequestFullScreen ? galleryContainer.mozRequestFullScreen() :
+                                galleryContainer.webkitRequestFullscreen ? galleryContainer.webkitRequestFullscreen() :
+                                galleryContainer.msRequestFullscreen ? galleryContainer.msRequestFullscreen() : null;
+                if (promise && promise.catch) {
+                    promise.catch(err => console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`));
+                }
+            } else {
+                if (document.exitFullscreen) document.exitFullscreen();
+                else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+                else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+                else if (document.msExitFullscreen) document.msExitFullscreen();
+            }
+        }
+
+        document.addEventListener('keydown', function(event) {
+            // Wenn keine Bilder geladen sind, nur 'F' und Leertaste (für ggf. Fehlermeldung) erlauben
+            if (imagesData.length === 0) {
+                if (event.key.toLowerCase() === 'f') {
+                    event.preventDefault();
+                    toggleFullscreen();
+                } else if (event.key === " " || event.code === "Space") {
+                     event.preventDefault(); // Verhindert Scrollen, aber tut sonst nichts, da keine Bilder
+                }
+                return;
+            }
+
+            // Aktionen, die immer funktionieren sollen (nicht vom Bildwechsel blockiert):
+            if (event.key.toLowerCase() === 'f') {
+                event.preventDefault();
+                toggleFullscreen();
+                return; // Wichtig: Verhindert, dass die Pfeiltastenprüfung auch noch greift
+            }
+            if (event.key === " " || event.code === "Space") {
+                event.preventDefault();
+                toggleFilename();
+                return; // Wichtig
+            }
+
+            // Aktionen, die durch den Bildwechsel blockiert werden können:
+            if (isTransitioningImage) return; // Jetzt nur noch für Pfeiltasten
+
+            switch (event.key.toLowerCase()) {
+                case "arrowright":
+                    nextImage();
+                    break;
+                case "arrowleft":
+                    prevImage();
+                    break;
+                // 'f' und Leertaste werden schon vorher behandelt
+            }
+        });
+
+        ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange', 'MSFullscreenChange'].forEach(
+            event => document.addEventListener(event, () => {})
+        );
+
+        // Initialisierung
+        showMessage( "Lade Bilderliste von GitHub...", "loading"); // expliziter Aufruf der Nachricht
+        fetchImageFilesFromGitHub();
+
+    </script>
+
+</body>
+</html>
